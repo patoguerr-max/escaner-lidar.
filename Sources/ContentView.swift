@@ -13,19 +13,25 @@ struct ContentView: View {
             ARViewContainer(arView: scan.arView)
                 .ignoresSafeArea()
 
-            VStack(spacing: 12) {
-                statusBar
-                Spacer()
-                if !scan.message.isEmpty {
-                    Text(scan.message)
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            if scan.phase == .diagnosing {
+                DiagnosticsView(report: scan.report) {
+                    scan.stopDiagnostics()
                 }
-                controls
+            } else {
+                VStack(spacing: 12) {
+                    statusBar
+                    Spacer()
+                    if !scan.message.isEmpty {
+                        Text(scan.message)
+                            .font(.footnote)
+                            .multilineTextAlignment(.center)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    controls
+                }
+                .padding()
             }
-            .padding()
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
@@ -68,26 +74,44 @@ struct ContentView: View {
     private var controls: some View {
         switch scan.phase {
         case .idle:
-            bigButton("Iniciar escaneo", systemImage: "viewfinder", tint: .blue) {
-                scan.startScan()
+            VStack(spacing: 10) {
+                bigButton("Iniciar escaneo", systemImage: "viewfinder", tint: .blue) {
+                    scan.startScan()
+                }
+                .disabled(!scan.lidarAvailable)
+                bigButton("Diagnóstico LiDAR", systemImage: "stethoscope", tint: .orange) {
+                    scan.startDiagnostics()
+                }
             }
-            .disabled(!scan.lidarAvailable)
         case .scanning:
             bigButton("Detener", systemImage: "stop.fill", tint: .red) {
                 scan.stopScan()
             }
         case .finished:
-            HStack(spacing: 12) {
-                bigButton("Nuevo", systemImage: "arrow.counterclockwise", tint: .gray) {
-                    scan.newScan()
+            VStack(spacing: 10) {
+                Toggle(isOn: $scan.zUp) {
+                    Label("Z vertical (Vulcan / CloudCompare)", systemImage: "arrow.up.and.down")
+                        .font(.subheadline)
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 .disabled(scan.isExporting)
-                bigButton(scan.isExporting ? "Exportando…" : "Exportar",
-                          systemImage: "square.and.arrow.up", tint: .green) {
-                    scan.export()
+
+                HStack(spacing: 12) {
+                    bigButton("Nuevo", systemImage: "arrow.counterclockwise", tint: .gray) {
+                        scan.newScan()
+                    }
+                    .disabled(scan.isExporting)
+                    bigButton(scan.isExporting ? "Exportando…" : "Exportar",
+                              systemImage: "square.and.arrow.up", tint: .green) {
+                        scan.export()
+                    }
+                    .disabled(scan.isExporting)
                 }
-                .disabled(scan.isExporting)
             }
+        case .diagnosing:
+            EmptyView()
         }
     }
 

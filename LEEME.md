@@ -6,7 +6,8 @@ Escanea en 3D y exporta dos archivos:
 - **`..._malla.obj`**: malla de triángulos generada por el LiDAR (geometría, sin textura).
 - **`..._nube.ply`**: nube de puntos a color (profundidad del LiDAR + color de la cámara).
 
-Unidades en metros. El eje **Y** es el vertical.
+Unidades en metros. Por defecto el eje **Z** es el vertical (como Vulcan, CloudCompare y Civil 3D);
+al exportar se puede desactivar para dejar el eje **Y** vertical, como lo entrega ARKit.
 
 ## Aviso importante
 
@@ -42,6 +43,11 @@ y repetir el paso 4 (los archivos escaneados no se pierden).
 
 ## Paso 3: usar la app
 
+Antes de escanear puedes pulsar **Diagnóstico LiDAR**: muestra el mapa de profundidad en vivo
+(rojo cerca, azul lejos), la distancia al centro, lecturas por segundo, porcentaje de confianza,
+seguimiento, luz y temperatura, y dice si el sensor está bien. Para probar la precisión, apunta
+el + a una pared mate a 1 m y compara con una huincha.
+
 1. Abre **Escáner LiDAR** y acepta el permiso de cámara.
 2. Pulsa **Iniciar escaneo** y muévete despacio alrededor del objeto o espacio. Verás la malla
    dibujarse encima de la imagen y los contadores de vértices y puntos subir.
@@ -53,7 +59,8 @@ y repetir el paso 4 (los archivos escaneados no se pierden).
 
 - Alcance útil del LiDAR: unos 5 m. Funciona mejor entre 0,3 y 3 m.
 - La malla no lleva textura; el color está en la nube de puntos.
-- La nube guarda un punto por cada centímetro cúbico, hasta 2 millones de puntos.
+- La nube guarda un punto por cada centímetro cúbico (confianza media y alta), hasta 2 millones
+  de puntos. Se leen unas 30 imágenes por segundo, fuera de la pantalla principal.
 - Superficies negras, brillantes, vidrio y agua se escanean mal.
 
 ## Abrir los archivos en el PC
@@ -70,5 +77,8 @@ y repetir el paso 4 (los archivos escaneados no se pierden).
 | `Sources/ScanManager.swift` | Sesión de ARKit: iniciar, detener, exportar |
 | `Sources/PointCloud.swift` | Nube de puntos a color y escritura del PLY |
 | `Sources/Exporter.swift` | Escritura del OBJ y guardado de archivos |
+| `Sources/FrameProcessor.swift` | Procesa los cuadros de la cámara en segundo plano |
+| `Sources/LidarDiagnostics.swift` | Mediciones del diagnóstico del sensor |
+| `Sources/DiagnosticsView.swift` | Pantalla del diagnóstico |
 | `project.yml` | Definición del proyecto (XcodeGen lo convierte en proyecto de Xcode) |
 | `.github/workflows/build.yml` | Receta de compilación en GitHub Actions |

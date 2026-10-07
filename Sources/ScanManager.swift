@@ -3,7 +3,7 @@ import Combine
 import ARKit
 import RealityKit
 
-/// Controla la sesión de ARKit: vista previa, escaneo, parada y exportación.
+/// Controla la sesión de ARKit: vista previa, escaneo, parada, exportación y diagnóstico.
 @MainActor
 final class ScanManager: ObservableObject {
 
@@ -11,6 +11,7 @@ final class ScanManager: ObservableObject {
         case idle
         case scanning
         case finished
+        case diagnosing
     }
 
     let arView: ARView
@@ -23,18 +24,35 @@ final class ScanManager: ObservableObject {
     @Published var isExporting: Bool = false
     @Published var exportedFiles: [URL] = []
     @Published var showShare: Bool = false
+    @Published var report: LidarReport?
+    /// Exportar con Z vertical (Vulcan, CloudCompare, Civil 3D). Se recuerda entre usos.
+    @Published var zUp: Bool {
+        didSet { UserDefaults.standard.set(zUp, forKey: "zUp") }
+    }
 
-    private let cloud = PointCloud()
+    private let processor = FrameProcessor()
     private var meshAnchors: [ARMeshAnchor] = []
 
     init() {
         arView = ARView(frame: .zero)
         lidarAvailable = ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+        zUp = UserDefaults.standard.object(forKey: "zUp") as? Bool ?? true
         arView.automaticallyConfigureSession = false
+
+        // Los cuadros de la cámara se procesan en una cola propia, no en la pantalla.
+        arView.session.delegate = processor
+        arView.session.delegateQueue = processor.queue
+        processor.onPointCount = { [weak self] count in
+            self?.cloudPoints = count
+        }
+        processor.onReport = { [weak self] report in
+            self?.report = report
+        }
     }
 
     /// Solo cámara, sin reconstrucción: lo que se ve antes de empezar.
     func startPreview() {
+        processor.setMode(.idle)
         guard ARWorldTrackingConfiguration.isSupported else {
             message = "Este dispositivo no es compatible con ARKit."
             return
@@ -52,11 +70,11 @@ final class ScanManager: ObservableObject {
     func startScan() {
         guard lidarAvailable else { return }
 
-        cloud.reset()
         meshAnchors = []
         exportedFiles = []
         meshVertices = 0
         cloudPoints = 0
+        processor.setMode(.scanning, resetCloud: true)
 
         let config = ARWorldTrackingConfiguration()
         config.sceneReconstruction = .mesh
@@ -77,9 +95,6 @@ final class ScanManager: ObservableObject {
     func tick() {
         guard phase == .scanning, let frame = arView.session.currentFrame else { return }
 
-        cloud.add(frame: frame)
-        cloudPoints = cloud.count
-
         var total = 0
         for anchor in frame.anchors {
             if let mesh = anchor as? ARMeshAnchor {
@@ -91,11 +106,12 @@ final class ScanManager: ObservableObject {
         let hint: String
         switch frame.camera.trackingState {
         case .normal:
-            hint = cloud.isFull
+            hint = cloudPoints >= PointCloud.maxPoints
                 ? "Nube de puntos llena. Detén y exporta."
                 : "Muévete despacio y recorre todas las caras."
         case .limited:
-            hint = "Seguimiento limitado: muévete más lento y busca mejor luz."
+            hint = "Seguimiento limitado (\(frame.camera.trackingState.texto)): "
+                + "muévete más lento y busca mejor luz."
         case .notAvailable:
             hint = "Seguimiento no disponible."
         }
@@ -106,6 +122,7 @@ final class ScanManager: ObservableObject {
 
     func stopScan() {
         guard phase == .scanning else { return }
+        processor.setMode(.idle)
         if let frame = arView.session.currentFrame {
             meshAnchors = frame.anchors.compactMap { $0 as? ARMeshAnchor }
         }
@@ -115,7 +132,7 @@ final class ScanManager: ObservableObject {
     }
 
     func newScan() {
-        cloud.reset()
+        processor.setMode(.idle, resetCloud: true)
         meshAnchors = []
         exportedFiles = []
         meshVertices = 0
@@ -129,18 +146,40 @@ final class ScanManager: ObservableObject {
         isExporting = true
         message = "Exportando…"
 
-        Task {
-            // Pequeña pausa para que la interfaz alcance a mostrar "Exportando…".
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            do {
-                let urls = try Exporter.export(meshAnchors: meshAnchors, cloud: cloud)
-                exportedFiles = urls
-                message = "Guardado en Archivos › En mi iPhone › Escáner LiDAR."
-                showShare = true
-            } catch {
-                message = "Error al exportar: \(error.localizedDescription)"
+        processor.export(meshAnchors: meshAnchors, zUp: zUp) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let urls):
+                self.exportedFiles = urls
+                self.message = "Guardado en Archivos › En mi iPhone › Escáner LiDAR."
+                self.showShare = true
+            case .failure(let error):
+                self.message = "Error al exportar: \(error.localizedDescription)"
             }
-            isExporting = false
+            self.isExporting = false
         }
+    }
+
+    // MARK: - Diagnóstico del sensor
+
+    func startDiagnostics() {
+        report = nil
+        phase = .diagnosing
+        guard ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) else {
+            report = LidarReport.unsupported()
+            return
+        }
+        let config = ARWorldTrackingConfiguration()
+        config.frameSemantics.insert(.sceneDepth)
+        arView.debugOptions.remove(.showSceneUnderstanding)
+        arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+        processor.setMode(.diagnosing)
+    }
+
+    func stopDiagnostics() {
+        processor.setMode(.idle)
+        report = nil
+        phase = .idle
+        startPreview()
     }
 }

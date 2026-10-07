@@ -20,18 +20,20 @@ final class PointCloud {
     private var voxels = Set<VoxelKey>()
 
     private let voxelSize: Float = 0.01
-    private let maxPoints = 2_000_000
+    static let maxPoints = 2_000_000
     private let minDepth: Float = 0.15
     private let maxDepth: Float = 5.0
     /// Se usa 1 de cada `step` píxeles del mapa de profundidad en cada eje.
     private let step = 2
+    /// Confianza mínima: 0 baja, 1 media, 2 alta.
+    private let minConfidence: UInt8 = 1
 
     var count: Int {
         rgb.count / 3
     }
 
     var isFull: Bool {
-        count >= maxPoints
+        count >= PointCloud.maxPoints
     }
 
     func reset() {
@@ -103,8 +105,8 @@ final class PointCloud {
             var u = 0
             while u < depthWidth {
                 let d = depthRow[u]
-                // Confianza: 0 baja, 1 media, 2 alta. Solo se guardan los puntos de confianza alta.
-                if confRow[u] >= 2, d.isFinite, d > minDepth, d < maxDepth {
+                // Se guardan los puntos de confianza media y alta.
+                if confRow[u] >= minConfidence, d.isFinite, d > minDepth, d < maxDepth {
                     let xCam = (Float(u) - cx) * d / fx
                     let yCam = (Float(v) - cy) * d / fy
                     // Cámara de ARKit: +X derecha, +Y arriba, mira hacia -Z.
@@ -146,11 +148,11 @@ final class PointCloud {
     }
 
     /// PLY binario (little endian): x y z como float32 y r g b como uchar.
-    func plyData() -> Data {
+    func plyData(zUp: Bool) -> Data {
         let n = count
         var header = "ply\n"
         header += "format binary_little_endian 1.0\n"
-        header += "comment Escaner LiDAR - metros - eje Y vertical\n"
+        header += "comment Escaner LiDAR - metros - eje \(zUp ? "Z" : "Y") vertical\n"
         header += "element vertex \(n)\n"
         header += "property float x\n"
         header += "property float y\n"
@@ -163,8 +165,9 @@ final class PointCloud {
         var body = [UInt8](repeating: 0, count: n * 15)
         var o = 0
         for i in 0..<n {
+            let p = Exporter.axes(SIMD3<Float>(xyz[i * 3], xyz[i * 3 + 1], xyz[i * 3 + 2]), zUp: zUp)
             for k in 0..<3 {
-                let bits = xyz[i * 3 + k].bitPattern
+                let bits = p[k].bitPattern
                 body[o] = UInt8(truncatingIfNeeded: bits)
                 body[o + 1] = UInt8(truncatingIfNeeded: bits >> 8)
                 body[o + 2] = UInt8(truncatingIfNeeded: bits >> 16)
